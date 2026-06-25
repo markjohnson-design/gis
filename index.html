@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Abingdon School - Land Scoring</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .ui-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel">
+        <h3>Land Scoring</h3>
+        <p>Click anywhere on the map<br>to score a 3x3m square.</p>
+        <button onclick="clearData()">Clear All Data</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        // 1. Initialize Map centered on Abingdon School
+        const map = L.map('map').setView([51.6685, -1.2845], 19);
+
+        // 2. Add Esri Satellite Imagery (gives it that ArcGIS look)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EAP, and the GIS User Community',
+            maxZoom: 20,
+            maxNativeZoom: 19
+        }).addTo(map);
+
+        // 3. Grid Math for 3x3 meter squares
+        // At latitude 51.66, 1 degree Lat is ~111,111m. 1 degree Lng is ~68,925m.
+        const latStep = 3 / 111111;      // Approx 0.000027 degrees
+        const lngStep = 3 / 68925;       // Approx 0.0000435 degrees
+
+        // 4. Load saved squares from LocalStorage
+        let scoredSquares = JSON.parse(localStorage.getItem('abingdonScores')) || {};
+
+        // Render existing squares on load
+        Object.keys(scoredSquares).forEach(key => {
+            drawSquare(JSON.parse(key), scoredSquares[key]);
+        });
+
+        // 5. Handle Map Clicks
+        map.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+
+            // Snap the click to our invisible 3x3m grid
+            const gridLat = Math.floor(lat / latStep) * latStep;
+            const gridLng = Math.floor(lng / lngStep) * lngStep;
+            
+            // Create a unique key for this exact square
+            const squareKey = JSON.stringify({lat: gridLat, lng: gridLng});
+
+            // Prompt user for a score
+            let score = prompt("Enter a score for this 3x3m square (1-10):");
+            
+            if (score !== null && score !== "") {
+                score = parseInt(score);
+                if (score >= 1 && score <= 10) {
+                    // Save and draw
+                    scoredSquares[squareKey] = score;
+                    localStorage.setItem('abingdonScores', JSON.stringify(scoredSquares));
+                    drawSquare({lat: gridLat, lng: gridLng}, score);
+                } else {
+                    alert("Please enter a valid number between 1 and 10.");
+                }
+            }
+        });
+
+        // 6. Function to draw the square
+        function drawSquare(gridCoords, score) {
+            const bounds = [
+                [gridCoords.lat, gridCoords.lng],
+                [gridCoords.lat + latStep, gridCoords.lng],
+                [gridCoords.lat + latStep, gridCoords.lng + lngStep],
+                [gridCoords.lat, gridCoords.lng + lngStep]
+            ];
+
+            // Color gradient from Red (1) to Green (10)
+            const hue = ((score - 1) * 12); // 1 = 0deg (Red), 10 = 108deg (Green)
+            const color = `hsl(${hue}, 100%, 50%)`;
+
+            L.polygon(bounds, {
+                color: '#fff',
+                weight: 1,
+                fillColor: color,
+                fillOpacity: 0.6
+            }).bindPopup(`Score: ${score}/10`).addTo(map);
+        }
+
+        // 7. Utility to clear data
+        function clearData() {
+            if(confirm("Are you sure you want to delete all scored squares?")) {
+                localStorage.removeItem('abingdonScores');
+                location.reload();
+            }
+        }
+    </script>
+</body>
+</html>
