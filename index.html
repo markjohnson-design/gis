@@ -191,10 +191,16 @@
                 // Safety limiter for massive shapes
                 if (bounds.getNorth() - bounds.getSouth() > 0.02) return; 
 
-                let gridCells = []; // Will hold an array of small 3x3 polygons
+                let gridCells = []; 
                 
-                for (let lat = bounds.getSouth(); lat <= bounds.getNorth(); lat += latStep) {
-                    for (let lng = bounds.getWest(); lng <= bounds.getEast(); lng += lngStep) {
+                // Snap the starting loop coordinates to the global 3x3m grid
+                const startLat = Math.floor(bounds.getSouth() / latStep) * latStep;
+                const endLat = bounds.getNorth();
+                const startLng = Math.floor(bounds.getWest() / lngStep) * lngStep;
+                const endLng = bounds.getEast();
+                
+                for (let lat = startLat; lat <= endLat; lat += latStep) {
+                    for (let lng = startLng; lng <= endLng; lng += lngStep) {
                         
                         // Check if the center of this specific 3x3 square is inside the custom shape
                         let centerLat = lat + (latStep / 2);
