@@ -99,7 +99,6 @@
 
         // --- 2. State & Variables ---
         let mode = 'pan'; // 'pan', 'paint', or 'draw'
-        let isPainting = false;
         let lastPaintedKey = null;
 
         let currentDrawPoints = [];
@@ -123,7 +122,6 @@
         // --- 4. Mode Switching ---
         function setMode(newMode) {
             mode = newMode;
-            isPainting = false;
 
             // Reset UI Buttons
             document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -152,40 +150,45 @@
         }
 
         // --- 5. Mouse Interaction Logic ---
-        map.on('mousedown', function(e) {
+        
+        // 1. Drawing uses precise single clicks
+        map.on('click', function(e) {
             if (mode === 'draw') {
                 currentDrawPoints.push([e.latlng.lat, e.latlng.lng]);
                 if (draftPolygon) map.removeLayer(draftPolygon);
                 const color = document.getElementById('boundary-color').value;
                 draftPolygon = L.polygon(currentDrawPoints, {color: color, weight: 2, fillOpacity: 0.2}).addTo(map);
-            } 
-            else if (mode === 'paint') {
+            }
+        });
+
+        // 2. Painting uses mouse down
+        map.on('mousedown', function(e) {
+            if (mode === 'paint') {
                 if (boundaries.length === 0) {
                     alert("Please draw a boundary first!");
                     return;
                 }
-                isPainting = true;
                 paintSquare(e.latlng);
             }
         });
 
+        // 3. Dragging the brush checks if the left mouse button is actively held down
         map.on('mousemove', function(e) {
-            if (mode === 'paint' && isPainting) {
-                paintSquare(e.latlng);
+            if (mode === 'paint') {
+                if (e.originalEvent && e.originalEvent.buttons === 1) {
+                    paintSquare(e.latlng);
+                }
             }
         });
 
+        // 4. Clean up when you let go of the mouse
         map.on('mouseup', function() {
-            if (mode === 'paint' && isPainting) {
-                isPainting = false;
-                lastPaintedKey = null; // Reset dragging memory
-                localStorage.setItem('abingdonScores', JSON.stringify(scoredSquares)); // Save batch
+            if (mode === 'paint') {
+                lastPaintedKey = null; // Reset dragging memory so you can paint over the same area again
+                localStorage.setItem('abingdonScores', JSON.stringify(scoredSquares)); // Save the batch
                 updateTally();
             }
         });
-
-        // Ensure painting stops if mouse leaves the map area
-        map.on('mouseout', function() { isPainting = false; });
 
         // --- 6. The Painting Function ---
         function paintSquare(latlng) {
@@ -241,12 +244,10 @@
                         if (isPointInPolygon([centerLat, centerLng], b.points)) {
                             const squareKey = JSON.stringify({lat: lat, lng: lng});
                             
-                            // Only fill if it doesn't already have a score
                             if (scoredSquares[squareKey] === undefined) {
                                 // Procedural baseline generator (Creates a natural-looking mix of 3s, 4s, 5s, 6s)
-                                // Uses coordinates as a seed so it looks spatial rather than pure random static
                                 let pseudoRandom = Math.abs(Math.sin(lat * 100000) * Math.cos(lng * 100000));
-                                let baseScore = Math.floor(pseudoRandom * 5) + 3; // Yields 3 to 7
+                                let baseScore = Math.floor(pseudoRandom * 5) + 3; 
                                 
                                 scoredSquares[squareKey] = baseScore;
                                 newSquaresAdded = true;
@@ -258,9 +259,9 @@
 
             if (newSquaresAdded) {
                 localStorage.setItem('abingdonScores', JSON.stringify(scoredSquares));
-                renderSquares(); // Re-render all to show the draft
+                renderSquares();
                 updateTally();
-                alert("First draft generated! You can now use the Paint tool to manually adjust areas that need higher or lower scores.");
+                alert("First draft generated! You can now use the Paint tool to manually adjust areas.");
             } else {
                 alert("All squares are already scored!");
             }
@@ -276,7 +277,7 @@
             boundaries.push({ points: currentDrawPoints, color: color });
             localStorage.setItem('abingdonBoundariesData', JSON.stringify(boundaries));
             
-            setMode('pan'); // Return to safe viewing mode
+            setMode('pan'); 
             renderBoundariesAndGrids();
         }
 
@@ -331,7 +332,7 @@
                 [gridCoords.lat, gridCoords.lng], [gridCoords.lat + latStep, gridCoords.lng],
                 [gridCoords.lat + latStep, gridCoords.lng + lngStep], [gridCoords.lat, gridCoords.lng + lngStep]
             ];
-            const hue = ((score - 1) * 12); // Red to Green gradient
+            const hue = ((score - 1) * 12); 
             L.polygon(bounds, { 
                 color: '#fff', weight: 1, fillColor: `hsl(${hue}, 100%, 50%)`, fillOpacity: 0.7, 
                 interactive: false // Crucial: lets mouse drag seamlessly over drawn squares
