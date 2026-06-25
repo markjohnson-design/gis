@@ -20,7 +20,9 @@
             border-radius: 8px;
             z-index: 1000;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-            min-width: 220px;
+            width: 260px;
+            max-height: 90vh;
+            overflow-y: auto;
         }
         .ui-panel h3, .ui-panel h4 { margin-top: 0; margin-bottom: 10px; }
         .tally-list { list-style: none; padding: 0; margin: 0 0 15px 0; font-size: 14px; }
@@ -28,6 +30,8 @@
         button { width: 100%; padding: 8px; margin-bottom: 8px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #f9f9f9; }
         button.action-btn { background: #0078A8; color: white; border: none; font-weight: bold; }
         #status-msg { font-size: 13px; color: #d32f2f; font-weight: bold; margin-bottom: 10px; }
+        .controls-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; font-size: 14px;}
+        input[type="color"] { cursor: pointer; border: none; padding: 0; width: 30px; height: 30px; }
     </style>
 </head>
 <body>
@@ -36,13 +40,26 @@
         <h3>Land Scoring</h3>
         <div id="status-msg">Mode: Scoring</div>
         
+        <div class="controls-row">
+            <input type="checkbox" id="toggle-vis" checked onchange="toggleBoundaries()">
+            <label for="toggle-vis">Show Boundaries & Grid</label>
+        </div>
+
+        <div class="controls-row">
+            <input type="color" id="boundary-color" value="#00ffff">
+            <label for="boundary-color">Boundary Color</label>
+        </div>
+
+        <button id="draw-btn" class="action-btn" onclick="startDrawing()">+ Draw New Boundary</button>
+        <button id="finish-btn" class="action-btn" style="display:none; background: #2e7d32;" onclick="finishDrawing()">Finish & Save</button>
+        
+        <hr style="border: 0.5px solid #ddd; margin: 15px 0;">
+        
         <h4>Score Tally</h4>
         <ul id="tally-list" class="tally-list"></ul>
 
-        <button id="draw-btn" class="action-btn" onclick="startDrawing()">1. Draw Custom Boundary</button>
-        <button id="finish-btn" class="action-btn" style="display:none; background: #2e7d32;" onclick="finishDrawing()">2. Finish & Save Boundary</button>
-        <hr style="border: 0.5px solid #ddd; margin: 15px 0;">
-        <button onclick="clearScores()">Clear Scored Squares</button>
+        <button onclick="clearScores()" style="font-size: 12px;">Clear Scores Only</button>
+        <button onclick="clearBoundaries()" style="font-size: 12px; color: red;">Clear All Boundaries</button>
     </div>
 
     <div id="map"></div>
@@ -58,45 +75,52 @@
 
         // --- 2. State & Variables ---
         let mode = 'score'; // 'score' or 'draw'
-        let boundaryPoints = [];
-        let boundaryPolygon = null;
+        let currentDrawPoints = [];
+        let draftPolygon = null;
+        
+        // Layer Groups
+        let boundariesGroup = L.layerGroup().addTo(map);
         let gridGroup = L.layerGroup().addTo(map);
         let squaresGroup = L.layerGroup().addTo(map);
         
         const latStep = 3 / 111111; 
         const lngStep = 3 / 68925;   
 
+        // Load existing data
         let scoredSquares = JSON.parse(localStorage.getItem('abingdonScores')) || {};
-        let savedBoundary = JSON.parse(localStorage.getItem('abingdonBoundary'));
+        let boundaries = JSON.parse(localStorage.getItem('abingdonBoundariesData')) || [];
 
-        // --- 3. Load Saved Data on Startup ---
-        if (savedBoundary && savedBoundary.length > 2) {
-            boundaryPoints = savedBoundary;
-            drawBoundaryAndGrid();
-        } else {
-            document.getElementById('status-msg').innerText = "Please draw a boundary first!";
-            startDrawing(); // Force drawing mode if no boundary exists
-        }
-
+        // --- 3. Initial Load ---
+        renderBoundariesAndGrids();
         renderSquares();
         updateTally();
 
         // --- 4. Interactive Drawing & Scoring Logic ---
         map.on('click', function(e) {
             if (mode === 'draw') {
-                // Add point to our boundary
-                boundaryPoints.push([e.latlng.lat, e.latlng.lng]);
+                currentDrawPoints.push([e.latlng.lat, e.latlng.lng]);
                 
-                // Update the visual polygon as we click
-                if (boundaryPolygon) map.removeLayer(boundaryPolygon);
-                boundaryPolygon = L.polygon(boundaryPoints, {color: '#ff0000', weight: 2, fillOpacity: 0.2}).addTo(map);
+                if (draftPolygon) map.removeLayer(draftPolygon);
+                const color = document.getElementById('boundary-color').value;
+                draftPolygon = L.polygon(currentDrawPoints, {color: color, weight: 2, fillOpacity: 0.2}).addTo(map);
             } 
             else if (mode === 'score') {
-                if (!boundaryPoints || boundaryPoints.length < 3) return;
+                if (boundaries.length === 0) {
+                    alert("Please draw at least one boundary first!");
+                    return;
+                }
 
-                // Check if click is inside the custom polygon
-                if (!isPointInPolygon([e.latlng.lat, e.latlng.lng], boundaryPoints)) {
-                    alert("Please click inside your defined boundary!");
+                // Check if click falls within ANY of the boundaries
+                let isInsideAny = false;
+                for (let b of boundaries) {
+                    if (isPointInPolygon([e.latlng.lat, e.latlng.lng], b.points)) {
+                        isInsideAny = true;
+                        break;
+                    }
+                }
+
+                if (!isInsideAny) {
+                    alert("Please click inside a defined boundary!");
                     return;
                 }
 
@@ -122,56 +146,110 @@
         // --- 5. Drawing Mode Functions ---
         function startDrawing() {
             mode = 'draw';
-            boundaryPoints = [];
-            gridGroup.clearLayers();
-            if (boundaryPolygon) map.removeLayer(boundaryPolygon);
+            currentDrawPoints = [];
+            if (draftPolygon) map.removeLayer(draftPolygon);
             
-            document.getElementById('status-msg').innerText = "Mode: Drawing (Click map to draw corners)";
+            document.getElementById('status-msg').innerText = "Mode: Drawing (Click to set corners)";
             document.getElementById('draw-btn').style.display = 'none';
             document.getElementById('finish-btn').style.display = 'block';
         }
 
         function finishDrawing() {
-            if (boundaryPoints.length < 3) {
+            if (currentDrawPoints.length < 3) {
                 alert("You need to click at least 3 points to make a shape!");
                 return;
             }
+            
+            // Save new boundary
+            const color = document.getElementById('boundary-color').value;
+            boundaries.push({ points: currentDrawPoints, color: color });
+            localStorage.setItem('abingdonBoundariesData', JSON.stringify(boundaries));
+            
             mode = 'score';
-            localStorage.setItem('abingdonBoundary', JSON.stringify(boundaryPoints));
+            if (draftPolygon) map.removeLayer(draftPolygon);
             
             document.getElementById('status-msg').innerText = "Mode: Scoring (Click grid to score)";
             document.getElementById('draw-btn').style.display = 'block';
             document.getElementById('finish-btn').style.display = 'none';
             
-            drawBoundaryAndGrid();
+            renderBoundariesAndGrids();
         }
 
-        function drawBoundaryAndGrid() {
+        // --- 6. Strictly Masked Grid Generation ---
+        function renderBoundariesAndGrids() {
+            boundariesGroup.clearLayers();
             gridGroup.clearLayers();
-            if (boundaryPolygon) map.removeLayer(boundaryPolygon);
 
-            // Draw the final boundary shape
-            boundaryPolygon = L.polygon(boundaryPoints, {color: '#ff0000', weight: 3, fillOpacity: 0.1, interactive: false}).addTo(map);
+            boundaries.forEach(b => {
+                // 1. Draw the outer boundary polygon
+                L.polygon(b.points, {color: b.color, weight: 3, fillOpacity: 0.1, interactive: false}).addTo(boundariesGroup);
 
-            // Calculate the bounding box of the custom shape to generate the grid lines
-            const bounds = boundaryPolygon.getBounds();
+                // 2. Generate the STRICT internal grid
+                const tempPoly = L.polygon(b.points);
+                const bounds = tempPoly.getBounds();
+                
+                // Safety limiter for massive shapes
+                if (bounds.getNorth() - bounds.getSouth() > 0.02) return; 
 
-            // Safety check: prevent drawing a grid over an area that is too massive (prevents browser crashes)
-            if (bounds.getNorth() - bounds.getSouth() > 0.02) {
-                alert("Boundary is too large to draw the 3m visual grid safely. Grid lines are hidden, but you can still click to score.");
-                return;
-            }
+                let gridCells = []; // Will hold an array of small 3x3 polygons
+                
+                for (let lat = bounds.getSouth(); lat <= bounds.getNorth(); lat += latStep) {
+                    for (let lng = bounds.getWest(); lng <= bounds.getEast(); lng += lngStep) {
+                        
+                        // Check if the center of this specific 3x3 square is inside the custom shape
+                        let centerLat = lat + (latStep / 2);
+                        let centerLng = lng + (lngStep / 2);
+                        
+                        if (isPointInPolygon([centerLat, centerLng], b.points)) {
+                            // If it is, create the coordinates for this single tiny square
+                            let squareBounds = [
+                                [lat, lng], [lat + latStep, lng], 
+                                [lat + latStep, lng + lngStep], [lat, lng + lngStep]
+                            ];
+                            gridCells.push(squareBounds);
+                        }
+                    }
+                }
+                
+                // Draw all the inner squares simultaneously as a single MultiPolygon for high performance
+                if (gridCells.length > 0) {
+                    L.polygon(gridCells, {
+                        color: '#ffffff', weight: 0.5, opacity: 0.4, fill: false, interactive: false
+                    }).addTo(gridGroup);
+                }
+            });
+        }
 
-            // Draw visual grid lines
-            for (let lng = bounds.getWest(); lng <= bounds.getEast(); lng += lngStep) {
-                L.polyline([[bounds.getSouth(), lng], [bounds.getNorth(), lng]], {color: 'white', weight: 0.5, opacity: 0.4, interactive: false}).addTo(gridGroup);
-            }
-            for (let lat = bounds.getSouth(); lat <= bounds.getNorth(); lat += latStep) {
-                L.polyline([[lat, bounds.getWest()], [lat, bounds.getEast()]], {color: 'white', weight: 0.5, opacity: 0.4, interactive: false}).addTo(gridGroup);
+        // --- 7. Toggles & Data Management ---
+        function toggleBoundaries() {
+            const isVisible = document.getElementById('toggle-vis').checked;
+            if (isVisible) {
+                map.addLayer(boundariesGroup);
+                map.addLayer(gridGroup);
+            } else {
+                map.removeLayer(boundariesGroup);
+                map.removeLayer(gridGroup);
             }
         }
 
-        // --- 6. Math: Ray-Casting Algorithm for Point-in-Polygon ---
+        function clearBoundaries() {
+            if(confirm("Delete ALL custom boundaries? Your scored squares will remain.")) {
+                boundaries = [];
+                localStorage.removeItem('abingdonBoundariesData');
+                renderBoundariesAndGrids();
+            }
+        }
+
+        function clearScores() {
+            if(confirm("Delete all scored squares? Your boundaries will remain.")) {
+                scoredSquares = {};
+                localStorage.removeItem('abingdonScores');
+                renderSquares();
+                updateTally();
+            }
+        }
+
+        // --- 8. Math: Ray-Casting Algorithm ---
         function isPointInPolygon(point, vs) {
             let x = point[0], y = point[1];
             let inside = false;
@@ -184,7 +262,7 @@
             return inside;
         }
 
-        // --- 7. Tally & Rendering Data ---
+        // --- 9. Tally & Square Rendering ---
         function updateTally() {
             let counts = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0, 10:0};
             Object.values(scoredSquares).forEach(s => counts[s]++);
@@ -205,24 +283,13 @@
                 const gridCoords = JSON.parse(key);
                 const score = scoredSquares[key];
                 const bounds = [
-                    [gridCoords.lat, gridCoords.lng],
-                    [gridCoords.lat + latStep, gridCoords.lng],
-                    [gridCoords.lat + latStep, gridCoords.lng + lngStep],
-                    [gridCoords.lat, gridCoords.lng + lngStep]
+                    [gridCoords.lat, gridCoords.lng], [gridCoords.lat + latStep, gridCoords.lng],
+                    [gridCoords.lat + lat instalmentsStep, gridCoords.lng + lngStep], [gridCoords.lat, gridCoords.lng + lngStep]
                 ];
                 const hue = ((score - 1) * 12); 
                 L.polygon(bounds, { color: '#fff', weight: 1, fillColor: `hsl(${hue}, 100%, 50%)`, fillOpacity: 0.7 })
                  .bindPopup(`Score: ${score}/10`).addTo(squaresGroup);
             });
-        }
-
-        function clearScores() {
-            if(confirm("Delete all scored squares? (This keeps your boundary)")) {
-                scoredSquares = {};
-                localStorage.removeItem('abingdonScores');
-                renderSquares();
-                updateTally();
-            }
         }
     </script>
 </body>
