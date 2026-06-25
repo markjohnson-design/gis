@@ -284,7 +284,7 @@
                 const score = scoredSquares[key];
                 const bounds = [
                     [gridCoords.lat, gridCoords.lng], [gridCoords.lat + latStep, gridCoords.lng],
-                    [gridCoords.lat + lat instalmentsStep, gridCoords.lng + lngStep], [gridCoords.lat, gridCoords.lng + lngStep]
+                    [gridCoords.lat + latStep, gridCoords.lng + lngStep], [gridCoords.lat, gridCoords.lng + lngStep]
                 ];
                 const hue = ((score - 1) * 12); 
                 L.polygon(bounds, { color: '#fff', weight: 1, fillColor: `hsl(${hue}, 100%, 50%)`, fillOpacity: 0.7 })
